@@ -7,7 +7,6 @@ public class MyBot : IChessBot
     private int is_white = 1;
     public double evaluate(Board b)
     {
-        //PieceList[] pieces = b.GetAllPieceLists();
         int white_score = 0;
         int black_score = 0;
 
