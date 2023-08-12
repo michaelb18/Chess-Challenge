@@ -1,54 +1,232 @@
 ﻿using ChessChallenge.API;
 using System;
-
+using System.Collections;
 namespace ChessChallenge.Example
 {
-    // A simple bot that can spot mate in one, and always captures the most valuable piece it can.
-    // Plays randomly otherwise.
+
     public class EvilBot : IChessBot
     {
-        // Piece values: null, pawn, knight, bishop, rook, queen, king
-        int[] pieceValues = { 0, 100, 300, 300, 500, 900, 10000 };
-
-        public Move Think(Board board, Timer timer)
+        Hashtable transpositions = new Hashtable();
+        private int is_white = 1;
+        public double evaluate(Board b)
         {
-            Move[] allMoves = board.GetLegalMoves();
-
-            // Pick a random move to play if nothing better is found
-            Random rng = new();
-            Move moveToPlay = allMoves[rng.Next(allMoves.Length)];
-            int highestValueCapture = 0;
-
-            foreach (Move move in allMoves)
+            //Avoid stalemate
+            /*************************************************************/
+            //Material Score
+            int white_score = 0;
+            int black_score = 0;
+            PieceList white_pawns = b.GetPieceList(PieceType.Pawn, true);
+            ulong whiteAttacks = 0;
+            foreach(Piece pawn in white_pawns)
             {
-                // Always play checkmate in one
-                if (MoveIsCheckmate(board, move))
-                {
-                    moveToPlay = move;
-                    break;
-                }
-
-                // Find highest value capture
-                Piece capturedPiece = board.GetPiece(move.TargetSquare);
-                int capturedPieceValue = pieceValues[(int)capturedPiece.PieceType];
-
-                if (capturedPieceValue > highestValueCapture)
-                {
-                    moveToPlay = move;
-                    highestValueCapture = capturedPieceValue;
-                }
+                whiteAttacks = whiteAttacks | BitboardHelper.GetPieceAttacks(PieceType.Pawn, pawn.Square, b, true);
+                white_score = white_score + 1;
             }
 
-            return moveToPlay;
+            PieceList white_bishop = b.GetPieceList(PieceType.Bishop, true);
+            foreach(Piece bishop in white_bishop)
+            {
+                whiteAttacks = whiteAttacks | BitboardHelper.GetPieceAttacks(PieceType.Bishop, bishop.Square, b, true);
+                white_score = white_score + 3;
+            }
+
+            PieceList white_knight = b.GetPieceList(PieceType.Knight, true);
+            foreach(Piece knight in white_knight)
+            {
+                whiteAttacks = whiteAttacks | BitboardHelper.GetPieceAttacks(PieceType.Knight, knight.Square, b, true);
+                white_score = white_score + 3;
+            }
+
+            PieceList white_queen = b.GetPieceList(PieceType.Queen, true);
+            foreach(Piece queen in white_queen)
+            {
+                whiteAttacks = whiteAttacks | BitboardHelper.GetPieceAttacks(PieceType.Queen, queen.Square, b, true);
+                white_score = white_score + 9;
+            }
+
+            PieceList white_king = b.GetPieceList(PieceType.King, true);
+            foreach(Piece king in white_king)
+            {
+                //whiteAttacks = whiteAttacks | BitboardHelper.GetPieceAttacks(PieceType.King, king.Square, b, true);
+                white_score = white_score + 10000;
+            }
+
+            ulong blackAttacks = 0;
+            PieceList black_pawns = b.GetPieceList(PieceType.Pawn, false);
+            foreach(Piece pawn in black_pawns)
+            {
+                blackAttacks = blackAttacks | BitboardHelper.GetPieceAttacks(PieceType.Pawn, pawn.Square, b, true);
+                black_score = black_score + 1;
+            }
+
+            PieceList black_bishop = b.GetPieceList(PieceType.Bishop, false);
+            foreach(Piece bishop in black_bishop)
+            {
+                blackAttacks = blackAttacks | BitboardHelper.GetPieceAttacks(PieceType.Bishop, bishop.Square, b, true);
+                black_score = black_score + 3;
+            }
+
+            PieceList black_knight = b.GetPieceList(PieceType.Knight, false);
+            foreach(Piece knight in black_knight)
+            {
+                blackAttacks = blackAttacks | BitboardHelper.GetPieceAttacks(PieceType.Knight, knight.Square, b, true);
+                black_score = black_score + 3;
+            }
+
+            PieceList black_queen = b.GetPieceList(PieceType.Queen, false);
+            foreach(Piece queen in black_queen)
+            {
+                blackAttacks = blackAttacks | BitboardHelper.GetPieceAttacks(PieceType.Queen, queen.Square, b, true);
+                black_score = black_score + 9;
+            }
+
+            PieceList black_king = b.GetPieceList(PieceType.King, false);
+            foreach(Piece king in white_king)
+            {
+                //blackAttacks = blackAttacks | BitboardHelper.GetPieceAttacks(PieceType.King, king.Square, b, true);
+                black_score = black_score + 10000;
+            }
+            /*************************************************************/
+
+            double[] scoreVector = {(white_score - black_score) * is_white, (BitboardHelper.GetNumberOfSetBits(whiteAttacks) - BitboardHelper.GetNumberOfSetBits(blackAttacks)) * is_white};
+            //double mag = Math.Sqrt(scoreVector[0] * scoreVector[0] + scoreVector[1] * scoreVector[1]);
+            //scoreVector[0] /= mag;
+            //scoreVector[1] /= mag;
+            double materialWeight = 0;
+            return 1 * scoreVector[0] + .1 * scoreVector[1];
+            //return (white_score - black_score) * is_white;
         }
 
-        // Test if this move gives checkmate
-        bool MoveIsCheckmate(Board board, Move move)
+        public (double score, Move m) minimax(int depth, Board b, bool max_or_min, double alpha, double beta)
         {
-            board.MakeMove(move);
-            bool isMate = board.IsInCheckmate();
-            board.UndoMove(move);
-            return isMate;
+            if(b.IsDraw())
+            {
+                if(b.GetLegalMoves().Length>0)
+                {
+                    return (-1000000000, b.GetLegalMoves()[0]);
+                }
+                else
+                {
+                    return (-1000000000, Move.NullMove);
+                }
+            }
+            if(depth == 0)
+            {
+                if(b.GetLegalMoves().Length>0)
+                {
+                    return (evaluate(b), b.GetLegalMoves()[0]);
+                }
+                else
+                {
+                    return (evaluate(b), Move.NullMove);
+                }
+            }
+            if(max_or_min)
+            {
+                /*if(transpositions.ContainsKey(b.ZobristKey))
+                {
+
+                    //Console.WriteLine(((Board)transpositions[b.ZobristKey]).ZobristKey);
+                    return minimax(depth, (Board)transpositions[b.ZobristKey], false, alpha, beta);
+                    //if(transpositions[b.ZobristKey] != null)
+                        //b.MakeMove((Move)transpositions[b.ZobristKey]);
+                        //return minimax(depth, b, false, alpha, beta);
+                }*/
+
+                Move bestMove = new Move();
+                double max_score = -99999999;
+                foreach(Move move in b.GetLegalMoves())
+                {
+                    b.MakeMove(move);
+                    double score = minimax(depth-1, b, false, alpha, beta).Item1;
+                    //Console.WriteLine("Depth: " + depth + " Number of moves left: " + b.GetLegalMoves().Length + " This move's score: " + score);
+                    if(score > max_score)
+                    {
+                        bestMove = move;
+                        max_score = score;
+                    }
+                    b.UndoMove(move);
+                    alpha = Math.Max(alpha, max_score);
+                    if(beta <= alpha)
+                    {
+                        /*b.MakeMove(bestMove);
+                        transpositions[b.ZobristKey] = b;
+                        b.UndoMove(bestMove);*/
+                        return (max_score, bestMove);
+                    }
+                }
+                
+                /*b.MakeMove(bestMove);
+                transpositions[b.ZobristKey] = b;
+                b.UndoMove(bestMove);*/
+                return (max_score, bestMove);
+            }
+            else
+            {
+                /*if(transpositions.ContainsKey(b.ZobristKey))
+                {
+                    //Console.WriteLine(((Board)transpositions[b.ZobristKey]).ZobristKey);
+                    //return minimax(depth, (Board)transpositions[b.ZobristKey], true, alpha, beta);
+                    //if(transpositions[b.ZobristKey] != null)
+                    //    b.MakeMove((Move)transpositions[b.ZobristKey]);
+                    //    return minimax(depth, b, true, alpha, beta);
+                }*/
+                Move bestMove = new Move();
+                double min_score = 99999999;
+                foreach(Move move in b.GetLegalMoves())
+                {
+                    b.MakeMove(move);
+                    double score = minimax(depth-1, b, true, alpha, beta).Item1;
+                    //Console.WriteLine("Depth: " + depth + " Number of moves left: " + b.GetLegalMoves().Length + " This move's score: " + score);
+                    if(score < min_score)
+                    {
+                        bestMove = move;
+                        min_score = score;
+                    }
+                    b.UndoMove(move);
+                    beta = Math.Min(beta, min_score);
+                    if(beta <= alpha)
+                    {
+                        /*b.MakeMove(bestMove);
+                        transpositions[b.ZobristKey] = b;
+                        b.UndoMove(bestMove);*/
+                        return (min_score, bestMove);
+                    }
+                }
+                
+                /*b.MakeMove(bestMove);
+                transpositions[b.ZobristKey] = b;
+                b.UndoMove(bestMove);*/
+                
+                return (min_score, bestMove);
+            }
+        }
+        public Move Think(Board board, Timer timer)
+        {
+            if(!board.IsWhiteToMove)
+            {
+                is_white = -1;
+            }
+            int ms_total = timer.MillisecondsRemaining;
+            double score = 0;
+            Move m = board.GetLegalMoves()[0];
+            int iter = 1;
+            double alpha = double.NegativeInfinity;
+            double beta = double.PositiveInfinity;
+            while(timer.MillisecondsElapsedThisTurn < (int)(.01 * ms_total))
+            {
+                (score, m) = minimax(iter, board, true, alpha, beta);
+                //Console.WriteLine("Score is " + score + " at iteration " + iter);
+                iter++;
+                //alpha = score - .25;
+                //beta = score + .25;
+            }
+            Console.WriteLine(score);
+            if(m == new Move())
+            {
+                return board.GetLegalMoves()[0];
+            }
+            return m;
         }
     }
 }
